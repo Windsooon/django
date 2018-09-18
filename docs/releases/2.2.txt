@@ -90,6 +90,10 @@ Minor features
 * :class:`~django.contrib.postgres.indexes.BrinIndex` now has the
   ``autosummarize`` parameter.
 
+* The new ``search_type`` parameter of
+  :class:`~django.contrib.postgres.search.SearchQuery` allows searching for
+  a phrase or raw expression.
+
 :mod:`django.contrib.redirects`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -170,7 +174,8 @@ Internationalization
 Management Commands
 ~~~~~~~~~~~~~~~~~~~
 
-* ...
+* The new :option:`--force-color` option forces colorization of the command
+  output.
 
 Migrations
 ~~~~~~~~~~
@@ -188,6 +193,11 @@ Models
 * Setting the new ``ignore_conflicts`` parameter of
   :meth:`.QuerySet.bulk_create` to ``True`` tells the database to ignore
   failure to insert rows that fail uniqueness constraints or other checks.
+
+* The new :class:`~django.db.models.functions.ExtractIsoYear` function extracts
+  ISO-8601 week-numbering years from :class:`~django.db.models.DateField` and
+  :class:`~django.db.models.DateTimeField`, and the new :lookup:`iso_year`
+  lookup allows querying by an ISO-8601 week-numbering year.
 
 Requests and Responses
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -218,6 +228,10 @@ Tests
 * The new :meth:`.SimpleTestCase.assertURLEqual` assertion checks for a given
   URL, ignoring the ordering of the query string.
   :meth:`~.SimpleTestCase.assertRedirects` uses the new assertion.
+
+* The test :class:`~.django.test.Client` now supports automatic JSON
+  serialization of list and tuple ``data`` when
+  ``content_type='application/json'``.
 
 URLs
 ~~~~
@@ -253,6 +267,10 @@ Database backend API
 Miscellaneous
 -------------
 
+* To improve readability, the ``UUIDField`` form field now displays values with
+  dashes, e.g. ``550e8400-e29b-41d4-a716-446655440000`` instead of
+  ``550e8400e29b41d4a716446655440000``.
+
 * On SQLite, ``PositiveIntegerField`` and ``PositiveSmallIntegerField`` now
   include a check constraint to prevent negative values in the database. If you
   have existing invalid data and run a migration that recreates a table, you'll
@@ -264,13 +282,31 @@ Miscellaneous
 * The return value of :func:`django.utils.text.slugify` is no longer marked as
   HTML safe.
 
+* The default truncation character used by the :tfilter:`urlizetrunc`,
+  :tfilter:`truncatechars`, :tfilter:`truncatechars_html`,
+  :tfilter:`truncatewords`, and :tfilter:`truncatewords_html` template filters
+  is now the real ellipsis character (``…``) instead of 3 dots. You may have to
+  adapt some test output comparisons.
+
 .. _deprecated-features-2.2:
 
 Features deprecated in 2.2
 ==========================
+
+Model ``Meta.ordering`` will no longer affect ``GROUP BY`` queries
+------------------------------------------------------------------
+
+A model's ``Meta.ordering`` affecting ``GROUP BY`` queries (such as
+``.annotate().values()``) is a common source of confusion. Such queries now
+issue a deprecation warning with the advice to add an ``order_by()`` to retain
+the current query. ``Meta.ordering`` will be ignored in such queries starting
+in Django 3.1.
 
 Miscellaneous
 -------------
 
 * ``django.utils.timezone.FixedOffset`` is deprecated in favor of
   :class:`datetime.timezone`.
+
+* The undocumented ``QuerySetPaginator`` alias of
+  ``django.core.paginator.Paginator`` is deprecated.

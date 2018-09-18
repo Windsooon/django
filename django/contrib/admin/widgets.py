@@ -193,7 +193,7 @@ class ForeignKeyRawIdWidget(forms.TextInput):
         except NoReverseMatch:
             url = ''  # Admin not registered for target model.
 
-        return Truncator(obj).words(14, truncate='...'), url
+        return Truncator(obj).words(14), url
 
 
 class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
@@ -349,6 +349,11 @@ class AdminIntegerFieldWidget(forms.NumberInput):
 
 class AdminBigIntegerFieldWidget(AdminIntegerFieldWidget):
     class_name = 'vBigIntegerField'
+
+
+class AdminUUIDInputWidget(forms.TextInput):
+    def __init__(self, attrs=None):
+        super().__init__(attrs={'class': 'vUUIDField', **(attrs or {})})
 
 
 # Mapping of lower case language codes [returned by Django's get_language()]

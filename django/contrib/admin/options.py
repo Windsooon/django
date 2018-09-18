@@ -92,6 +92,7 @@ FORMFIELD_FOR_DBFIELD_DEFAULTS = {
     models.ImageField: {'widget': widgets.AdminFileWidget},
     models.FileField: {'widget': widgets.AdminFileWidget},
     models.EmailField: {'widget': widgets.AdminEmailInputWidget},
+    models.UUIDField: {'widget': widgets.AdminUUIDInputWidget},
 }
 
 csrf_protect_m = method_decorator(csrf_protect)
@@ -584,13 +585,8 @@ class ModelAdmin(BaseModelAdmin):
         inline_instances = []
         for inline_class in self.inlines:
             inline = inline_class(self.model, self.admin_site)
-            # RemovedInDjango30Warning: obj will be a required argument.
-            args = get_func_args(inline.has_add_permission)
-            if 'obj' in args:
-                inline_has_add_permission = inline.has_add_permission(request, obj)
-            else:
-                inline_has_add_permission = inline.has_add_permission(request)
             if request:
+                inline_has_add_permission = inline._has_add_permission(request, obj)
                 if not (inline.has_view_or_change_permission(request, obj) or
                         inline_has_add_permission or
                         inline.has_delete_permission(request, obj)):
@@ -1322,13 +1318,9 @@ class ModelAdmin(BaseModelAdmin):
             self.message_user(request, msg, messages.SUCCESS)
             return self.response_post_save_change(request, obj)
 
-    def response_post_save_add(self, request, obj):
-        """
-        Figure out where to redirect after the 'Save' button has been pressed
-        when adding a new object.
-        """
+    def _response_post_save(self, request, obj):
         opts = self.model._meta
-        if self.has_change_permission(request, None):
+        if self.has_view_or_change_permission(request):
             post_url = reverse('admin:%s_%s_changelist' %
                                (opts.app_label, opts.model_name),
                                current_app=self.admin_site.name)
@@ -1338,24 +1330,20 @@ class ModelAdmin(BaseModelAdmin):
             post_url = reverse('admin:index',
                                current_app=self.admin_site.name)
         return HttpResponseRedirect(post_url)
+
+    def response_post_save_add(self, request, obj):
+        """
+        Figure out where to redirect after the 'Save' button has been pressed
+        when adding a new object.
+        """
+        return self._response_post_save(request, obj)
 
     def response_post_save_change(self, request, obj):
         """
         Figure out where to redirect after the 'Save' button has been pressed
         when editing an existing object.
         """
-        opts = self.model._meta
-
-        if self.has_change_permission(request, None):
-            post_url = reverse('admin:%s_%s_changelist' %
-                               (opts.app_label, opts.model_name),
-                               current_app=self.admin_site.name)
-            preserved_filters = self.get_preserved_filters(request)
-            post_url = add_preserved_filters({'preserved_filters': preserved_filters, 'opts': opts}, post_url)
-        else:
-            post_url = reverse('admin:index',
-                               current_app=self.admin_site.name)
-        return HttpResponseRedirect(post_url)
+        return self._response_post_save(request, obj)
 
     def response_action(self, request, queryset):
         """
@@ -1491,7 +1479,7 @@ class ModelAdmin(BaseModelAdmin):
         for inline, formset in zip(inline_instances, formsets):
             fieldsets = list(inline.get_fieldsets(request, obj))
             readonly = list(inline.get_readonly_fields(request, obj))
-            has_add_permission = inline.has_add_permission(request, obj)
+            has_add_permission = inline._has_add_permission(request, obj)
             has_change_permission = inline.has_change_permission(request, obj)
             has_delete_permission = inline.has_delete_permission(request, obj)
             has_view_permission = inline.has_view_permission(request, obj)
@@ -2009,6 +1997,11 @@ class InlineModelAdmin(BaseModelAdmin):
             js.append('collapse%s.js' % extra)
         return forms.Media(js=['admin/js/%s' % url for url in js])
 
+    def _has_add_permission(self, request, obj):
+        # RemovedInDjango30Warning: obj will be a required argument.
+        args = get_func_args(self.has_add_permission)
+        return self.has_add_permission(request, obj) if 'obj' in args else self.has_add_permission(request)
+
     def get_extra(self, request, obj=None, **kwargs):
         """Hook for customizing the number of extra inline forms."""
         return self.extra
@@ -2054,7 +2047,7 @@ class InlineModelAdmin(BaseModelAdmin):
 
         base_model_form = defaults['form']
         can_change = self.has_change_permission(request, obj) if request else True
-        can_add = self.has_add_permission(request, obj) if request else True
+        can_add = self._has_add_permission(request, obj) if request else True
 
         class DeleteProtectedModelForm(base_model_form):
 

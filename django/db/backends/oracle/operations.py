@@ -69,6 +69,8 @@ END;
             return "TO_CHAR(%s, 'IW')" % field_name
         elif lookup_type == 'quarter':
             return "TO_CHAR(%s, 'Q')" % field_name
+        elif lookup_type == 'iso_year':
+            return "TO_CHAR(%s, 'IYYY')" % field_name
         else:
             # https://docs.oracle.com/database/121/SQLRF/functions067.htm#SQLRF00639
             return "EXTRACT(%s FROM %s)" % (lookup_type.upper(), field_name)
@@ -224,7 +226,9 @@ END;
 
     def fetch_returned_insert_id(self, cursor):
         try:
-            return int(cursor._insert_id_var.getvalue())
+            value = cursor._insert_id_var.getvalue()
+            # cx_Oracle < 7 returns value, >= 7 returns list with single value.
+            return int(value[0] if isinstance(value, list) else value)
         except (IndexError, TypeError):
             # cx_Oracle < 6.3 returns None, >= 6.3 raises IndexError.
             raise DatabaseError(
@@ -567,7 +571,7 @@ END;
         if internal_type == 'DateField':
             lhs_sql, lhs_params = lhs
             rhs_sql, rhs_params = rhs
-            return "NUMTODSINTERVAL(%s - %s, 'DAY')" % (lhs_sql, rhs_sql), lhs_params + rhs_params
+            return "NUMTODSINTERVAL(TO_NUMBER(%s - %s), 'DAY')" % (lhs_sql, rhs_sql), lhs_params + rhs_params
         return super().subtract_temporals(internal_type, lhs, rhs)
 
     def bulk_batch_size(self, fields, objs):

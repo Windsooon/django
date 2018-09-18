@@ -347,7 +347,11 @@ class TestContextDecorator:
                 context = self.enable()
                 if self.attr_name:
                     setattr(inner_self, self.attr_name, context)
-                decorated_setUp(inner_self)
+                try:
+                    decorated_setUp(inner_self)
+                except Exception:
+                    self.disable()
+                    raise
 
             def tearDown(inner_self):
                 decorated_tearDown(inner_self)
@@ -859,3 +863,18 @@ def tag(*tags):
             setattr(obj, 'tags', set(tags))
         return obj
     return decorator
+
+
+@contextmanager
+def register_lookup(field, *lookups, lookup_name=None):
+    """
+    Context manager to temporarily register lookups on a model field using
+    lookup_name (or the lookup's lookup_name if not provided).
+    """
+    try:
+        for lookup in lookups:
+            field.register_lookup(lookup, lookup_name)
+        yield
+    finally:
+        for lookup in lookups:
+            field._unregister_lookup(lookup, lookup_name)

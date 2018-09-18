@@ -1,0 +1,21 @@
+==========================
+Django 2.1.2 release notes
+==========================
+
+*Expected October 1, 2018*
+
+Django 2.1.2 fixes several bugs in 2.1.1
+
+Bugfixes
+========
+
+* Fixed a regression where nonexistent joins in ``F()`` no longer raised
+  ``FieldError`` (:ticket:`29727`).
+
+* Fixed a regression where files starting with a tilde or underscore weren't
+  ignored by the migrations loader (:ticket:`29749`).
+
+* Made migrations detect changes to ``Meta.default_related_name``
+  (:ticket:`29755`).
+
+* Added compatibility for ``cx_Oracle`` 7 (:ticket:`29759`).

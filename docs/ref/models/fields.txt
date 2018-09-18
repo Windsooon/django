@@ -626,7 +626,7 @@ A :class:`CharField` that checks that the value is a valid email address using
 A file-upload field.
 
 .. note::
-    The ``primary_key`` argument isn't supported and will raise a an error if
+    The ``primary_key`` argument isn't supported and will raise an error if
     used.
 
 Has two optional arguments:
@@ -1194,8 +1194,8 @@ Relationships defined this way on :ref:`abstract models
 <abstract-base-classes>` are resolved when the model is subclassed as a
 concrete model and are not relative to the abstract model's ``app_label``:
 
-.. snippet::
-    :filename: products/models.py
+.. code-block:: python
+    :caption: products/models.py
 
     from django.db import models
 
@@ -1205,8 +1205,8 @@ concrete model and are not relative to the abstract model's ``app_label``:
         class Meta:
             abstract = True
 
-.. snippet::
-    :filename: production/models.py
+.. code-block:: python
+    :caption: production/models.py
 
     from django.db import models
     from products.models import AbstractCar
