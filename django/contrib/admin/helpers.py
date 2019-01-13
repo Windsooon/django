@@ -197,6 +197,12 @@ class AdminReadonlyField:
         except (AttributeError, ValueError, ObjectDoesNotExist):
             result_repr = self.empty_value_display
         else:
+            if field in self.form.fields:
+                widget = self.form[field].field.widget
+                # This isn't elegant but suffices for contrib.auth's
+                # ReadOnlyPasswordHashWidget.
+                if getattr(widget, 'read_only', False):
+                    return widget.render(field, value)
             if f is None:
                 if getattr(attr, 'boolean', False):
                     result_repr = _boolean_icon(value)
@@ -273,6 +279,7 @@ class InlineAdminFormSet:
                 continue
             if not self.has_change_permission or field_name in self.readonly_fields:
                 yield {
+                    'name': field_name,
                     'label': meta_labels.get(field_name) or label_for_field(field_name, self.opts.model, self.opts),
                     'widget': {'is_hidden': False},
                     'required': False,
@@ -284,6 +291,7 @@ class InlineAdminFormSet:
                 if label is None:
                     label = label_for_field(field_name, self.opts.model, self.opts)
                 yield {
+                    'name': field_name,
                     'label': label,
                     'widget': form_field.widget,
                     'required': form_field.required,

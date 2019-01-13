@@ -1660,11 +1660,17 @@ generating a ``SELECT ... FOR UPDATE`` SQL statement on supported databases.
 
 For example::
 
-    entries = Entry.objects.select_for_update().filter(author=request.user)
+    from django.db import transaction
 
-All matched entries will be locked until the end of the transaction block,
-meaning that other transactions will be prevented from changing or acquiring
-locks on them.
+    entries = Entry.objects.select_for_update().filter(author=request.user)
+    with transaction.atomic():
+        for entry in entries:
+            ...
+
+When the queryset is evaluated (``for entry in entries`` in this case), all
+matched entries will be locked until the end of the transaction block, meaning
+that other transactions will be prevented from changing or acquiring locks on
+them.
 
 Usually, if another transaction has already acquired a lock on one of the
 selected rows, the query will block until the lock is released. If this is
@@ -2088,6 +2094,43 @@ instance (if the database normally supports it).
 .. versionchanged:: 2.2
 
     The ``ignore_conflicts`` parameter was added.
+
+``bulk_update()``
+~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 2.2
+
+.. method:: bulk_update(objs, fields, batch_size=None)
+
+This method efficiently updates the given fields on the provided model
+instances, generally with one query::
+
+    >>> objs = [
+    ...    Entry.objects.create(headline='Entry 1'),
+    ...    Entry.objects.create(headline='Entry 2'),
+    ... ]
+    >>> objs[0].headline = 'This is entry 1'
+    >>> objs[1].headline = 'This is entry 2'
+    >>> Entry.objects.bulk_update(objs, ['headline'])
+
+:meth:`.QuerySet.update` is used to save the changes, so this is more efficient
+than iterating through the list of models and calling ``save()`` on each of
+them, but it has a few caveats:
+
+* You cannot update the model's primary key.
+* Each model's ``save()`` method isn't called, and the
+  :attr:`~django.db.models.signals.pre_save` and
+  :attr:`~django.db.models.signals.post_save` signals aren't sent.
+* If updating a large number of columns in a large number of rows, the SQL
+  generated can be very large. Avoid this by specifying a suitable
+  ``batch_size``.
+* Updating fields defined on multi-table inheritance ancestors will incur an
+  extra query per ancestor.
+* If ``objs`` contains duplicates, only the first one is updated.
+
+The ``batch_size`` parameter controls how many objects are saved in a single
+query. The default is to create all objects in one batch, except for SQLite
+and Oracle which have restrictions on the number of variables used in a query.
 
 ``count()``
 ~~~~~~~~~~~
@@ -3255,10 +3298,10 @@ documentation to learn how to create your aggregates.
 
 All aggregates have the following parameters in common:
 
-``expression``
-~~~~~~~~~~~~~~
+``expressions``
+~~~~~~~~~~~~~~~
 
-A string that references a field on the model, or a :doc:`query expression
+Strings that reference fields on the model, or :doc:`query expressions
 </ref/models/expressions>`.
 
 ``output_field``
@@ -3272,6 +3315,8 @@ of the return value
     When combining multiple field types, Django can only determine the
     ``output_field`` if all fields are of the same type. Otherwise, you
     must provide the ``output_field`` yourself.
+
+.. _aggregate-filter:
 
 ``filter``
 ~~~~~~~~~~
@@ -3356,12 +3401,9 @@ by the aggregate.
         By default, ``StdDev`` returns the population standard deviation. However,
         if ``sample=True``, the return value will be the sample standard deviation.
 
-    .. admonition:: SQLite
+    .. versionchanged:: 2.2
 
-        SQLite doesn't provide ``StdDev`` out of the box. An implementation
-        is available as an extension module for SQLite. Consult the `SQlite
-        documentation`_ for instructions on obtaining and installing this
-        extension.
+        SQLite support was added.
 
 ``Sum``
 ~~~~~~~
@@ -3390,14 +3432,9 @@ by the aggregate.
         By default, ``Variance`` returns the population variance. However,
         if ``sample=True``, the return value will be the sample variance.
 
-    .. admonition:: SQLite
+    .. versionchanged:: 2.2
 
-        SQLite doesn't provide ``Variance`` out of the box. An implementation
-        is available as an extension module for SQLite. Consult the `SQlite
-        documentation`_ for instructions on obtaining and installing this
-        extension.
-
-.. _SQLite documentation: https://www.sqlite.org/contrib
+        SQLite support was added.
 
 Query-related tools
 ===================

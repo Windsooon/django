@@ -352,7 +352,8 @@ file) to standard output.
 
 You may choose what tables or views to inspect by passing their names as
 arguments. If no arguments are provided, models are created for views only if
-the :option:`--include-views` option is used.
+the :option:`--include-views` option is used. Models for partition tables are
+created on PostgreSQL if the :option:`--include-partitions` option is used.
 
 Use this if you have a legacy database with which you'd like to use Django.
 The script will inspect the database and create a model for each table within
@@ -383,13 +384,6 @@ you run it, you'll want to look over the generated models yourself to make
 customizations. In particular, you'll need to rearrange models' order, so that
 models that refer to other models are ordered properly.
 
-Primary keys are automatically introspected for PostgreSQL, MySQL and
-SQLite, in which case Django puts in the ``primary_key=True`` where
-needed.
-
-``inspectdb`` works with PostgreSQL, MySQL and SQLite. Foreign-key detection
-only works in PostgreSQL and with certain types of MySQL tables.
-
 Django doesn't create database defaults when a
 :attr:`~django.db.models.Field.default` is specified on a model field.
 Similarly, database defaults aren't translated to model field defaults or
@@ -402,9 +396,39 @@ table's lifecycle, you'll need to change the
 :attr:`~django.db.models.Options.managed` option to ``True`` (or simply remove
 it because ``True`` is its default value).
 
+Database-specific notes
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Oracle
+^^^^^^
+
+* Models are created for materialized views if :option:`--include-views` is
+  used.
+
+PostgreSQL
+^^^^^^^^^^
+
+* Models are created for foreign tables.
+* Models are created for materialized views if
+  :option:`--include-views` is used.
+* Models are created for partition tables if
+  :option:`--include-partitions` is used.
+
+.. versionchanged:: 2.2
+
+    Support for foreign tables and materialized views was added.
+
 .. django-admin-option:: --database DATABASE
 
 Specifies the database to introspect. Defaults to ``default``.
+
+.. django-admin-option:: --include-partitions
+
+.. versionadded:: 2.2
+
+If this option is provided, models are also created for partitions.
+
+Only support for PostgreSQL is implemented.
 
 .. django-admin-option:: --include-views
 
@@ -606,8 +630,7 @@ the :ref:`i18n documentation <how-to-create-language-files>` for details.
 
 This command doesn't require configured settings. However, when settings aren't
 configured, the command can't ignore the :setting:`MEDIA_ROOT` and
-:setting:`STATIC_ROOT` directories or include :setting:`LOCALE_PATHS`. It will
-also write files in UTF-8 rather than in :setting:`FILE_CHARSET`.
+:setting:`STATIC_ROOT` directories or include :setting:`LOCALE_PATHS`.
 
 .. django-admin-option:: --all, -a
 
@@ -750,7 +773,14 @@ Enables fixing of migration conflicts.
 
 .. django-admin-option:: --name NAME, -n NAME
 
-Allows naming the generated migration(s) instead of using a generated name.
+Allows naming the generated migration(s) instead of using a generated name. The
+name must be a valid Python :ref:`identifier <python:identifiers>`.
+
+.. django-admin-option:: --no-header
+
+.. versionadded:: 2.2
+
+Generate migration files without Django version and timestamp header.
 
 .. django-admin-option:: --check
 
@@ -1132,6 +1162,12 @@ Suppresses all user prompts.
 Sets the name of the squashed migration. When omitted, the name is based on the
 first and last migration, with ``_squashed_`` in between.
 
+.. django-admin-option:: --no-header
+
+.. versionadded:: 2.2
+
+Generate squashed migration file without Django version and timestamp header.
+
 ``startapp``
 ------------
 
@@ -1393,10 +1429,10 @@ For example, this command::
 
 ...would perform the following steps:
 
-1. Create a test database, as described in :ref:`the-test-database`.
-2. Populate the test database with fixture data from the given fixtures.
+#. Create a test database, as described in :ref:`the-test-database`.
+#. Populate the test database with fixture data from the given fixtures.
    (For more on fixtures, see the documentation for :djadmin:`loaddata` above.)
-3. Runs the Django development server (as in :djadmin:`runserver`), pointed at
+#. Runs the Django development server (as in :djadmin:`runserver`), pointed at
    this newly created test database instead of your production database.
 
 This is useful in a number of ways:
@@ -1608,7 +1644,7 @@ Example usage::
 
     django-admin migrate --pythonpath='/home/djangoprojects/myproject'
 
-.. _import search path: http://www.diveintopython3.net/your-first-python-program.html#importsearchpath
+.. _import search path: https://www.diveinto.org/python3/your-first-python-program.html#importsearchpath
 
 .. django-admin-option:: --settings SETTINGS
 

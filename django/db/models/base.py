@@ -16,7 +16,7 @@ from django.db import (
     connections, router, transaction,
 )
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.constraints import CheckConstraint
+from django.db.models.constraints import CheckConstraint, UniqueConstraint
 from django.db.models.deletion import CASCADE, Collector
 from django.db.models.fields.related import (
     ForeignObjectRel, OneToOneField, lazy_related_operation, resolve_relation,
@@ -58,6 +58,11 @@ def subclass_exception(name, bases, module, attached_to):
     })
 
 
+def _has_contribute_to_class(value):
+    # Only call contribute_to_class() if it's bound.
+    return not inspect.isclass(value) and hasattr(value, 'contribute_to_class')
+
+
 class ModelBase(type):
     """Metaclass for all models."""
     def __new__(cls, name, bases, attrs, **kwargs):
@@ -75,8 +80,15 @@ class ModelBase(type):
         classcell = attrs.pop('__classcell__', None)
         if classcell is not None:
             new_attrs['__classcell__'] = classcell
-        new_class = super_new(cls, name, bases, new_attrs, **kwargs)
         attr_meta = attrs.pop('Meta', None)
+        # Pass all attrs without a (Django-specific) contribute_to_class()
+        # method to type.__new__() so that they're properly initialized
+        # (i.e. __set_name__()).
+        for obj_name, obj in list(attrs.items()):
+            if not _has_contribute_to_class(obj):
+                new_attrs[obj_name] = attrs.pop(obj_name)
+        new_class = super_new(cls, name, bases, new_attrs, **kwargs)
+
         abstract = getattr(attr_meta, 'abstract', False)
         meta = attr_meta or getattr(new_class, 'Meta', None)
         base_meta = getattr(new_class, '_meta', None)
@@ -300,8 +312,7 @@ class ModelBase(type):
         return new_class
 
     def add_to_class(cls, name, value):
-        # We should call the contribute_to_class method only if it's bound
-        if not inspect.isclass(value) and hasattr(value, 'contribute_to_class'):
+        if _has_contribute_to_class(value):
             value.contribute_to_class(cls, name)
         else:
             setattr(cls, name, value)
@@ -676,9 +687,9 @@ class Model(metaclass=ModelBase):
                         "save() prohibited to prevent data loss due to "
                         "unsaved related object '%s'." % field.name
                     )
-                # If the relationship's pk was changed, clear the cached
-                # relationship.
-                if obj and obj.pk != getattr(self, field.attname):
+                # If the relationship's pk/to_field was changed, clear the
+                # cached relationship.
+                if obj and getattr(obj, field.target_field.attname) != getattr(self, field.attname):
                     field.delete_cached_value(self)
 
         using = using or router.db_for_write(self.__class__, instance=self)
@@ -749,7 +760,12 @@ class Model(metaclass=ModelBase):
                 sender=origin, instance=self, raw=raw, using=using,
                 update_fields=update_fields,
             )
-        with transaction.atomic(using=using, savepoint=False):
+        # A transaction isn't needed if one query is issued.
+        if meta.parents:
+            context_manager = transaction.atomic(using=using, savepoint=False)
+        else:
+            context_manager = transaction.mark_for_rollback_on_error(using=using)
+        with context_manager:
             parent_inserted = False
             if not raw:
                 parent_inserted = self._save_parents(cls, using, update_fields)
@@ -977,15 +993,26 @@ class Model(metaclass=ModelBase):
         unique_checks = []
 
         unique_togethers = [(self.__class__, self._meta.unique_together)]
+        constraints = [(self.__class__, self._meta.constraints)]
         for parent_class in self._meta.get_parent_list():
             if parent_class._meta.unique_together:
                 unique_togethers.append((parent_class, parent_class._meta.unique_together))
+            if parent_class._meta.constraints:
+                constraints.append((parent_class, parent_class._meta.constraints))
 
         for model_class, unique_together in unique_togethers:
             for check in unique_together:
                 if not any(name in exclude for name in check):
                     # Add the check if the field isn't excluded.
                     unique_checks.append((model_class, tuple(check)))
+
+        for model_class, model_constraints in constraints:
+            for constraint in model_constraints:
+                if (isinstance(constraint, UniqueConstraint) and
+                        # Partial unique constraints can't be validated.
+                        constraint.condition is None and
+                        not any(name in exclude for name in constraint.fields)):
+                    unique_checks.append((model_class, constraint.fields))
 
         # These are checks for the unique_for_<date/year/month>.
         date_checks = []

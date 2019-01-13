@@ -11,6 +11,7 @@ from django.db.models import (
     Avg, Case, Count, DecimalField, F, IntegerField, Max, Q, StdDev, Sum,
     Value, Variance, When,
 )
+from django.db.models.aggregates import Aggregate
 from django.test import (
     TestCase, ignore_warnings, skipUnlessAnyDBFeature, skipUnlessDBFeature,
 )
@@ -1116,7 +1117,6 @@ class AggregationTests(TestCase):
             lambda b: (b.name, b.authorCount)
         )
 
-    @skipUnlessDBFeature('supports_stddev')
     def test_stddev(self):
         self.assertEqual(
             Book.objects.aggregate(StdDev('pages')),
@@ -1496,6 +1496,16 @@ class AggregationTests(TestCase):
         """Find ages that are shared by at least two authors."""
         qs = Author.objects.values_list('age', flat=True).annotate(age_count=Count('age')).filter(age_count__gt=1)
         self.assertSequenceEqual(qs, [29])
+
+    def test_allow_distinct(self):
+        class MyAggregate(Aggregate):
+            pass
+        with self.assertRaisesMessage(TypeError, 'MyAggregate does not allow distinct'):
+            MyAggregate('foo', distinct=True)
+
+        class DistinctAggregate(Aggregate):
+            allow_distinct = True
+        DistinctAggregate('foo', distinct=True)
 
 
 class JoinPromotionTests(TestCase):

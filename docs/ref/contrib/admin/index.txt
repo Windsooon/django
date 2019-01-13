@@ -1067,9 +1067,9 @@ subclass::
     slug (e.g. substituting dashes for spaces; lowercasing ASCII letters; and
     removing various English stop words such as 'a', 'an', 'as', and similar).
 
-    Fields are prepopulated on add forms but not on change forms. It's usually
-    undesired that slugs change after an object is created (which would cause
-    an object's URL to change if the slug is used in it).
+    Prepopulated fields aren't modified by JavaScript after a value has been
+    saved. It's usually undesired that slugs change (which would cause an
+    object's URL to change if the slug is used in it).
 
     ``prepopulated_fields`` doesn't accept ``DateTimeField``, ``ForeignKey``,
     ``OneToOneField``, and ``ManyToManyField`` fields.
@@ -2413,7 +2413,9 @@ The ``InlineModelAdmin`` class adds or customizes:
 
     .. versionchanged:: 2.1
 
-        The ``obj`` argument was added.
+        The ``obj`` argument was added. During the deprecation period, it may
+        also be ``None`` if third-party calls to ``has_add_permission()`` don't
+        provide it.
 
 .. method:: InlineModelAdmin.has_change_permission(request, obj=None)
 

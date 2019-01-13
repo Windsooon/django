@@ -1,5 +1,7 @@
-from django.db.models import Func, IntegerField, Transform, Value, fields
+from django.db.models.expressions import Func, Value
+from django.db.models.fields import IntegerField
 from django.db.models.functions import Coalesce
+from django.db.models.lookups import Transform
 
 
 class BytesToCharFieldConversionMixin:
@@ -124,7 +126,7 @@ class Length(Transform):
     """Return the number of characters in the expression."""
     function = 'LENGTH'
     lookup_name = 'length'
-    output_field = fields.IntegerField()
+    output_field = IntegerField()
 
     def as_mysql(self, compiler, connection, **extra_context):
         return super().as_sql(compiler, connection, function='CHAR_LENGTH', **extra_context)
@@ -183,6 +185,25 @@ class Replace(Func):
         super().__init__(expression, text, replacement, **extra)
 
 
+class Reverse(Transform):
+    function = 'REVERSE'
+    lookup_name = 'reverse'
+
+    def as_oracle(self, compiler, connection, **extra_context):
+        # REVERSE in Oracle is undocumented and doesn't support multi-byte
+        # strings. Use a special subquery instead.
+        return super().as_sql(
+            compiler, connection,
+            template=(
+                '(SELECT LISTAGG(s) WITHIN GROUP (ORDER BY n DESC) FROM '
+                '(SELECT LEVEL n, SUBSTR(%(expressions)s, LEVEL, 1) s '
+                'FROM DUAL CONNECT BY LEVEL <= LENGTH(%(expressions)s)) '
+                'GROUP BY %(expressions)s)'
+            ),
+            **extra_context
+        )
+
+
 class Right(Left):
     function = 'RIGHT'
 
@@ -207,7 +228,7 @@ class StrIndex(Func):
     """
     function = 'INSTR'
     arity = 2
-    output_field = fields.IntegerField()
+    output_field = IntegerField()
 
     def as_postgresql(self, compiler, connection, **extra_context):
         return super().as_sql(compiler, connection, function='STRPOS', **extra_context)

@@ -11,8 +11,9 @@ from django.db.models.aggregates import (
     Avg, Count, Max, Min, StdDev, Sum, Variance,
 )
 from django.db.models.expressions import (
-    Case, Col, Combinable, Exists, ExpressionList, ExpressionWrapper, F, Func,
-    OrderBy, OuterRef, Random, RawSQL, Ref, Subquery, Value, When,
+    Case, Col, Combinable, Exists, Expression, ExpressionList,
+    ExpressionWrapper, F, Func, OrderBy, OuterRef, Random, RawSQL, Ref,
+    Subquery, Value, When,
 )
 from django.db.models.functions import (
     Coalesce, Concat, Length, Lower, Substr, Upper,
@@ -273,18 +274,17 @@ class BasicExpressionsTests(TestCase):
     def test_object_update_fk(self):
         # F expressions cannot be used to update attributes which are foreign
         # keys, or attributes which involve joins.
-        def test():
-            self.gmbh.point_of_contact = F('ceo')
+        test_gmbh = Company.objects.get(pk=self.gmbh.pk)
         msg = 'F(ceo)": "Company.point_of_contact" must be a "Employee" instance.'
         with self.assertRaisesMessage(ValueError, msg):
-            test()
+            test_gmbh.point_of_contact = F('ceo')
 
-        self.gmbh.point_of_contact = self.gmbh.ceo
-        self.gmbh.save()
-        self.gmbh.name = F('ceo__last_name')
+        test_gmbh.point_of_contact = self.gmbh.ceo
+        test_gmbh.save()
+        test_gmbh.name = F('ceo__last_name')
         msg = 'Joined field references are not permitted in this query'
         with self.assertRaisesMessage(FieldError, msg):
-            self.gmbh.save()
+            test_gmbh.save()
 
     def test_object_update_unsaved_objects(self):
         # F expressions cannot be used to update attributes on objects which do
@@ -823,13 +823,39 @@ class ExpressionsTests(TestCase):
         )
 
 
+class SimpleExpressionTests(SimpleTestCase):
+
+    def test_equal(self):
+        self.assertEqual(Expression(), Expression())
+        self.assertEqual(
+            Expression(models.IntegerField()),
+            Expression(output_field=models.IntegerField())
+        )
+        self.assertNotEqual(
+            Expression(models.IntegerField()),
+            Expression(models.CharField())
+        )
+
+    def test_hash(self):
+        self.assertEqual(hash(Expression()), hash(Expression()))
+        self.assertEqual(
+            hash(Expression(models.IntegerField())),
+            hash(Expression(output_field=models.IntegerField()))
+        )
+        self.assertNotEqual(
+            hash(Expression(models.IntegerField())),
+            hash(Expression(models.CharField())),
+        )
+
+
 class ExpressionsNumericTests(TestCase):
 
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
         Number(integer=-1).save()
         Number(integer=42).save()
         Number(integer=1337).save()
-        self.assertEqual(Number.objects.update(float=F('integer')), 3)
+        Number.objects.update(float=F('integer'))
 
     def test_fill_with_value_from_same_object(self):
         """
@@ -1412,7 +1438,7 @@ class FieldTransformTests(TestCase):
         )
 
 
-class ReprTests(TestCase):
+class ReprTests(SimpleTestCase):
 
     def test_expressions(self):
         self.assertEqual(
@@ -1455,18 +1481,22 @@ class ReprTests(TestCase):
 
     def test_aggregates(self):
         self.assertEqual(repr(Avg('a')), "Avg(F(a))")
-        self.assertEqual(repr(Count('a')), "Count(F(a), distinct=False)")
-        self.assertEqual(repr(Count('*')), "Count('*', distinct=False)")
+        self.assertEqual(repr(Count('a')), "Count(F(a))")
+        self.assertEqual(repr(Count('*')), "Count('*')")
         self.assertEqual(repr(Max('a')), "Max(F(a))")
         self.assertEqual(repr(Min('a')), "Min(F(a))")
         self.assertEqual(repr(StdDev('a')), "StdDev(F(a), sample=False)")
         self.assertEqual(repr(Sum('a')), "Sum(F(a))")
         self.assertEqual(repr(Variance('a', sample=True)), "Variance(F(a), sample=True)")
 
+    def test_distinct_aggregates(self):
+        self.assertEqual(repr(Count('a', distinct=True)), "Count(F(a), distinct=True)")
+        self.assertEqual(repr(Count('*', distinct=True)), "Count('*', distinct=True)")
+
     def test_filtered_aggregates(self):
         filter = Q(a=1)
         self.assertEqual(repr(Avg('a', filter=filter)), "Avg(F(a), filter=(AND: ('a', 1)))")
-        self.assertEqual(repr(Count('a', filter=filter)), "Count(F(a), distinct=False, filter=(AND: ('a', 1)))")
+        self.assertEqual(repr(Count('a', filter=filter)), "Count(F(a), filter=(AND: ('a', 1)))")
         self.assertEqual(repr(Max('a', filter=filter)), "Max(F(a), filter=(AND: ('a', 1)))")
         self.assertEqual(repr(Min('a', filter=filter)), "Min(F(a), filter=(AND: ('a', 1)))")
         self.assertEqual(repr(StdDev('a', filter=filter)), "StdDev(F(a), filter=(AND: ('a', 1)), sample=False)")
@@ -1474,6 +1504,9 @@ class ReprTests(TestCase):
         self.assertEqual(
             repr(Variance('a', sample=True, filter=filter)),
             "Variance(F(a), filter=(AND: ('a', 1)), sample=True)"
+        )
+        self.assertEqual(
+            repr(Count('a', filter=filter, distinct=True)), "Count(F(a), distinct=True, filter=(AND: ('a', 1)))"
         )
 
 

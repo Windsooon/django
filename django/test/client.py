@@ -192,7 +192,12 @@ def encode_multipart(boundary, data):
     # file, or a *list* of form values and/or files. Remember that HTTP field
     # names can be duplicated!
     for (key, value) in data.items():
-        if is_file(value):
+        if value is None:
+            raise TypeError(
+                'Cannot encode None as POST data. Did you mean to pass an '
+                'empty string or omit the value?'
+            )
+        elif is_file(value):
             lines.extend(encode_file(boundary, key, value))
         elif not isinstance(value, str) and is_iterable(value):
             for item in value:
@@ -275,7 +280,7 @@ class RequestFactory:
         # This is a minimal valid WSGI environ dictionary, plus:
         # - HTTP_COOKIE: for cookie support,
         # - REMOTE_ADDR: often useful, see #8551.
-        # See http://www.python.org/dev/peps/pep-3333/#environ-variables
+        # See https://www.python.org/dev/peps/pep-3333/#environ-variables
         return {
             'HTTP_COOKIE': '; '.join(sorted(
                 '%s=%s' % (morsel.key, morsel.coded_value)

@@ -437,6 +437,28 @@ class ModelAdminTests(TestCase):
             ['main_band', 'day', 'transport', 'id', 'DELETE']
         )
 
+    def test_raw_id_fields_widget_override(self):
+        """
+        The autocomplete_fields, raw_id_fields, and radio_fields widgets may
+        overridden by specifying a widget in get_formset().
+        """
+        class ConcertInline(TabularInline):
+            model = Concert
+            fk_name = 'main_band'
+            raw_id_fields = ('opening_band',)
+
+            def get_formset(self, request, obj=None, **kwargs):
+                kwargs['widgets'] = {'opening_band': Select}
+                return super().get_formset(request, obj, **kwargs)
+
+        class BandAdmin(ModelAdmin):
+            inlines = [ConcertInline]
+
+        ma = BandAdmin(Band, self.site)
+        band_widget = list(ma.get_formsets_with_inlines(request))[0][0]().forms[0].fields['opening_band'].widget
+        # Without the override this would be ForeignKeyRawIdWidget.
+        self.assertIsInstance(band_widget, Select)
+
     def test_queryset_override(self):
         # If the queryset of a ModelChoiceField in a custom form is overridden,
         # RelatedFieldWidgetWrapper doesn't mess that up.
@@ -712,6 +734,10 @@ class ModelAdminPermissionTests(SimpleTestCase):
         def has_perm(self, perm):
             return perm == 'modeladmin.add_band'
 
+    class MockAddUserWithInline(MockUser):
+        def has_perm(self, perm):
+            return perm == 'modeladmin.add_concert'
+
     class MockChangeUser(MockUser):
         def has_perm(self, perm):
             return perm == 'modeladmin.change_band'
@@ -766,6 +792,26 @@ class ModelAdminPermissionTests(SimpleTestCase):
         request = MockRequest()
         request.user = self.MockAddUser()
         self.assertEqual(ma.get_inline_instances(request), [])
+        band = Band(name='The Doors', bio='', sign_date=date(1965, 1, 1))
+        inline_instances = ma.get_inline_instances(request, band)
+        self.assertEqual(len(inline_instances), 1)
+        self.assertIsInstance(inline_instances[0], ConcertInline)
+
+    def test_inline_has_add_permission_without_obj(self):
+        # This test will be removed in Django 3.1 when `obj` becomes a required
+        # argument of has_add_permission() (#27991).
+        class ConcertInline(TabularInline):
+            model = Concert
+
+            def has_add_permission(self, request):
+                return super().has_add_permission(request)
+
+        class BandAdmin(ModelAdmin):
+            inlines = [ConcertInline]
+
+        ma = BandAdmin(Band, AdminSite())
+        request = MockRequest()
+        request.user = self.MockAddUserWithInline()
         band = Band(name='The Doors', bio='', sign_date=date(1965, 1, 1))
         inline_instances = ma.get_inline_instances(request, band)
         self.assertEqual(len(inline_instances), 1)

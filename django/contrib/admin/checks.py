@@ -20,6 +20,17 @@ from django.utils.deprecation import RemovedInDjango30Warning
 from django.utils.inspect import get_func_args
 
 
+def _issubclass(cls, classinfo):
+    """
+    issubclass() variant that doesn't raise an exception if cls isn't a
+    class.
+    """
+    try:
+        return issubclass(cls, classinfo)
+    except TypeError:
+        return False
+
+
 def check_admin_app(app_configs, **kwargs):
     from django.contrib.admin.sites import all_sites
     errors = []
@@ -341,7 +352,7 @@ class BaseModelAdminChecks:
 
     def _check_form(self, obj):
         """ Check that form subclasses BaseModelForm. """
-        if not issubclass(obj.form, BaseModelForm):
+        if not _issubclass(obj.form, BaseModelForm):
             return must_inherit_from(parent='BaseModelForm', option='form',
                                      obj=obj, id='admin.E016')
         else:
@@ -606,6 +617,7 @@ class ModelAdminChecks(BaseModelAdminChecks):
             *self._check_search_fields(admin_obj),
             *self._check_date_hierarchy(admin_obj),
             *self._check_action_permission_methods(admin_obj),
+            *self._check_actions_uniqueness(admin_obj),
         ]
 
     def _check_save_as(self, obj):
@@ -639,11 +651,20 @@ class ModelAdminChecks(BaseModelAdminChecks):
 
     def _check_inlines_item(self, obj, inline, label):
         """ Check one inline model admin. """
-        inline_label = inline.__module__ + '.' + inline.__name__
+        try:
+            inline_label = inline.__module__ + '.' + inline.__name__
+        except AttributeError:
+            return [
+                checks.Error(
+                    "'%s' must inherit from 'InlineModelAdmin'." % obj,
+                    obj=obj.__class__,
+                    id='admin.E104',
+                )
+            ]
 
         from django.contrib.admin.options import InlineModelAdmin
 
-        if not issubclass(inline, InlineModelAdmin):
+        if not _issubclass(inline, InlineModelAdmin):
             return [
                 checks.Error(
                     "'%s' must inherit from 'InlineModelAdmin'." % inline_label,
@@ -659,7 +680,7 @@ class ModelAdminChecks(BaseModelAdminChecks):
                     id='admin.E105',
                 )
             ]
-        elif not issubclass(inline.model, models.Model):
+        elif not _issubclass(inline.model, models.Model):
             return must_be('a Model', option='%s.model' % inline_label, obj=obj, id='admin.E106')
         else:
             return inline(obj.model, obj.admin_site).check()
@@ -762,7 +783,7 @@ class ModelAdminChecks(BaseModelAdminChecks):
 
         if callable(item) and not isinstance(item, models.Field):
             # If item is option 3, it should be a ListFilter...
-            if not issubclass(item, ListFilter):
+            if not _issubclass(item, ListFilter):
                 return must_inherit_from(parent='ListFilter', option=label,
                                          obj=obj, id='admin.E113')
             # ...  but not a FieldListFilter.
@@ -779,7 +800,7 @@ class ModelAdminChecks(BaseModelAdminChecks):
         elif isinstance(item, (tuple, list)):
             # item is option #2
             field, list_filter_class = item
-            if not issubclass(list_filter_class, FieldListFilter):
+            if not _issubclass(list_filter_class, FieldListFilter):
                 return must_inherit_from(parent='FieldListFilter', option='%s[1]' % label, obj=obj, id='admin.E115')
             else:
                 return []
@@ -944,6 +965,18 @@ class ModelAdminChecks(BaseModelAdminChecks):
                     )
         return errors
 
+    def _check_actions_uniqueness(self, obj):
+        """Check that every action has a unique __name__."""
+        names = [name for _, name, _ in obj._get_base_actions()]
+        if len(names) != len(set(names)):
+            return [checks.Error(
+                '__name__ attributes of actions defined in %s must be '
+                'unique.' % obj.__class__,
+                obj=obj.__class__,
+                id='admin.E130',
+            )]
+        return []
+
 
 class InlineModelAdminChecks(BaseModelAdminChecks):
 
@@ -1028,7 +1061,7 @@ class InlineModelAdminChecks(BaseModelAdminChecks):
     def _check_formset(self, obj):
         """ Check formset is a subclass of BaseModelFormSet. """
 
-        if not issubclass(obj.formset, BaseModelFormSet):
+        if not _issubclass(obj.formset, BaseModelFormSet):
             return must_inherit_from(parent='BaseModelFormSet', option='formset', obj=obj, id='admin.E206')
         else:
             return []

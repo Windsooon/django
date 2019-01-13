@@ -1,5 +1,6 @@
 import copy
 import datetime
+import inspect
 from decimal import Decimal
 
 from django.core.exceptions import EmptyResultSet, FieldError
@@ -8,6 +9,7 @@ from django.db.models import fields
 from django.db.models.query_utils import Q
 from django.utils.deconstruct import deconstructible
 from django.utils.functional import cached_property
+from django.utils.hashable import make_hashable
 
 
 class SQLiteNumericMixin:
@@ -360,28 +362,27 @@ class BaseExpression:
             if expr:
                 yield from expr.flatten()
 
+    @cached_property
+    def identity(self):
+        constructor_signature = inspect.signature(self.__init__)
+        args, kwargs = self._constructor_args
+        signature = constructor_signature.bind_partial(*args, **kwargs)
+        signature.apply_defaults()
+        arguments = signature.arguments.items()
+        identity = [self.__class__]
+        for arg, value in arguments:
+            if isinstance(value, fields.Field):
+                value = type(value)
+            else:
+                value = make_hashable(value)
+            identity.append((arg, value))
+        return tuple(identity)
+
     def __eq__(self, other):
-        if self.__class__ != other.__class__:
-            return False
-        path, args, kwargs = self.deconstruct()
-        other_path, other_args, other_kwargs = other.deconstruct()
-        if (path, args) == (other_path, other_args):
-            kwargs = kwargs.copy()
-            other_kwargs = other_kwargs.copy()
-            output_field = type(kwargs.pop('output_field', None))
-            other_output_field = type(other_kwargs.pop('output_field', None))
-            if output_field == other_output_field:
-                return kwargs == other_kwargs
-        return False
+        return isinstance(other, BaseExpression) and other.identity == self.identity
 
     def __hash__(self):
-        path, args, kwargs = self.deconstruct()
-        kwargs = kwargs.copy()
-        output_field = type(kwargs.pop('output_field', None))
-        return hash((path, output_field) + args + tuple([
-            (key, tuple(value)) if isinstance(value, list) else (key, value)
-            for key, value in kwargs.items()
-        ]))
+        return hash(self.identity)
 
 
 class Expression(BaseExpression, Combinable):
@@ -695,9 +696,6 @@ class RawSQL(Expression):
     def get_group_by_cols(self):
         return [self]
 
-    def __hash__(self):
-        return hash((self.sql, self.output_field) + tuple(self.params))
-
 
 class Star(Expression):
     def __repr__(self):
@@ -947,8 +945,7 @@ class Case(Expression):
         return self.cases + [self.default]
 
     def set_source_expressions(self, exprs):
-        self.cases = exprs[:-1]
-        self.default = exprs[-1]
+        *self.cases, self.default = exprs
 
     def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False, for_save=False):
         c = self.copy()
@@ -1295,14 +1292,14 @@ class WindowFrame(Expression):
     template = '%(frame_type)s BETWEEN %(start)s AND %(end)s'
 
     def __init__(self, start=None, end=None):
-        self.start = start
-        self.end = end
+        self.start = Value(start)
+        self.end = Value(end)
 
     def set_source_expressions(self, exprs):
         self.start, self.end = exprs
 
     def get_source_expressions(self):
-        return [Value(self.start), Value(self.end)]
+        return [self.start, self.end]
 
     def as_sql(self, compiler, connection):
         connection.ops.check_expression_support(self)
@@ -1320,16 +1317,16 @@ class WindowFrame(Expression):
         return []
 
     def __str__(self):
-        if self.start is not None and self.start < 0:
-            start = '%d %s' % (abs(self.start), connection.ops.PRECEDING)
-        elif self.start is not None and self.start == 0:
+        if self.start.value is not None and self.start.value < 0:
+            start = '%d %s' % (abs(self.start.value), connection.ops.PRECEDING)
+        elif self.start.value is not None and self.start.value == 0:
             start = connection.ops.CURRENT_ROW
         else:
             start = connection.ops.UNBOUNDED_PRECEDING
 
-        if self.end is not None and self.end > 0:
-            end = '%d %s' % (self.end, connection.ops.FOLLOWING)
-        elif self.end is not None and self.end == 0:
+        if self.end.value is not None and self.end.value > 0:
+            end = '%d %s' % (self.end.value, connection.ops.FOLLOWING)
+        elif self.end.value is not None and self.end.value == 0:
             end = connection.ops.CURRENT_ROW
         else:
             end = connection.ops.UNBOUNDED_FOLLOWING

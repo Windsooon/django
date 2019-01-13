@@ -63,6 +63,7 @@ and two directions (forward and reverse) for a total of six combinations.
    ``ReverseManyToManyDescriptor``, use ``ManyToManyDescriptor`` instead.
 """
 
+from django.core.exceptions import FieldError
 from django.db import connections, router, transaction
 from django.db.models import Q, signals
 from django.db.models.query import QuerySet
@@ -576,7 +577,23 @@ def create_reverse_many_to_one_manager(superclass, rel):
                 val = getattr(self.instance, field.attname)
                 if val is None or (val == '' and empty_strings_as_null):
                     return queryset.none()
-            queryset._known_related_objects = {self.field: {self.instance.pk: self.instance}}
+            if self.field.many_to_one:
+                # Guard against field-like objects such as GenericRelation
+                # that abuse create_reverse_many_to_one_manager() with reverse
+                # one-to-many relationships instead and break known related
+                # objects assignment.
+                try:
+                    target_field = self.field.target_field
+                except FieldError:
+                    # The relationship has multiple target fields. Use a tuple
+                    # for related object id.
+                    rel_obj_id = tuple([
+                        getattr(self.instance, target_field.attname)
+                        for target_field in self.field.get_path_info()[-1].target_fields
+                    ])
+                else:
+                    rel_obj_id = getattr(self.instance, target_field.attname)
+                queryset._known_related_objects = {self.field: {rel_obj_id: self.instance}}
             return queryset
 
         def _remove_prefetched_objects(self):
@@ -911,6 +928,33 @@ def create_forward_many_to_many_manager(superclass, rel, reverse):
                 self.prefetch_cache_name,
                 False,
             )
+
+        @property
+        def constrained_target(self):
+            # If the through relation's target field's foreign integrity is
+            # enforced, the query can be performed solely against the through
+            # table as the INNER JOIN'ing against target table is unnecessary.
+            if not self.target_field.db_constraint:
+                return None
+            db = router.db_for_read(self.through, instance=self.instance)
+            if not connections[db].features.supports_foreign_keys:
+                return None
+            hints = {'instance': self.instance}
+            manager = self.through._base_manager.db_manager(db, hints=hints)
+            filters = {self.source_field_name: self.instance.pk}
+            # Nullable target rows must be excluded as well as they would have
+            # been filtered out from an INNER JOIN.
+            if self.target_field.null:
+                filters['%s__isnull' % self.target_field_name] = False
+            return manager.filter(**filters)
+
+        def exists(self):
+            constrained_target = self.constrained_target
+            return constrained_target.exists() if constrained_target else super().exists()
+
+        def count(self):
+            constrained_target = self.constrained_target
+            return constrained_target.count() if constrained_target else super().count()
 
         def add(self, *objs):
             if not rel.through._meta.auto_created:

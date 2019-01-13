@@ -5,11 +5,11 @@ from io import StringIO
 from unittest import mock
 
 from django.conf import settings
-from django.conf.urls import url
 from django.contrib.staticfiles.finders import get_finder, get_finders
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.exceptions import ImproperlyConfigured
 from django.core.files.storage import default_storage
-from django.db import connection, models, router
+from django.db import connection, connections, models, router
 from django.forms import EmailField, IntegerField
 from django.http import HttpResponse
 from django.template.loader import render_to_string
@@ -22,7 +22,7 @@ from django.test.utils import (
     CaptureQueriesContext, TestContextDecorator, isolate_apps,
     override_settings, setup_test_environment,
 )
-from django.urls import NoReverseMatch, reverse
+from django.urls import NoReverseMatch, path, reverse
 
 from .models import Car, Person, PossessedCar
 from .views import empty_response
@@ -185,9 +185,10 @@ class AssertNumQueriesUponConnectionTests(TransactionTestCase):
 
 
 class AssertQuerysetEqualTests(TestCase):
-    def setUp(self):
-        self.p1 = Person.objects.create(name='p1')
-        self.p2 = Person.objects.create(name='p2')
+    @classmethod
+    def setUpTestData(cls):
+        cls.p1 = Person.objects.create(name='p1')
+        cls.p2 = Person.objects.create(name='p2')
 
     def test_ordered(self):
         self.assertQuerysetEqual(
@@ -255,8 +256,9 @@ class AssertQuerysetEqualTests(TestCase):
 @override_settings(ROOT_URLCONF='test_utils.urls')
 class CaptureQueriesContextManagerTests(TestCase):
 
-    def setUp(self):
-        self.person_pk = str(Person.objects.create(name='test').pk)
+    @classmethod
+    def setUpTestData(cls):
+        cls.person_pk = str(Person.objects.create(name='test').pk)
 
     def test_simple(self):
         with CaptureQueriesContext(connection) as captured_queries:
@@ -960,11 +962,11 @@ class AssertURLEqualTests(SimpleTestCase):
 
 
 class FirstUrls:
-    urlpatterns = [url(r'first/$', empty_response, name='first')]
+    urlpatterns = [path('first/', empty_response, name='first')]
 
 
 class SecondUrls:
-    urlpatterns = [url(r'second/$', empty_response, name='second')]
+    urlpatterns = [path('second/', empty_response, name='second')]
 
 
 class SetupTestEnvironmentTests(SimpleTestCase):
@@ -1092,7 +1094,7 @@ class OverrideSettingsTests(SimpleTestCase):
         Overriding the STATICFILES_STORAGE setting should be reflected in
         the value of django.contrib.staticfiles.storage.staticfiles_storage.
         """
-        new_class = 'CachedStaticFilesStorage'
+        new_class = 'ManifestStaticFilesStorage'
         new_storage = 'django.contrib.staticfiles.storage.' + new_class
         with self.settings(STATICFILES_STORAGE=new_storage):
             self.assertEqual(staticfiles_storage.__class__.__name__, new_class)
@@ -1159,31 +1161,66 @@ class TestBadSetUpTestData(TestCase):
 class DisallowedDatabaseQueriesTests(SimpleTestCase):
     def test_disallowed_database_queries(self):
         expected_message = (
-            "Database queries aren't allowed in SimpleTestCase. "
-            "Either use TestCase or TransactionTestCase to ensure proper test isolation or "
-            "set DisallowedDatabaseQueriesTests.allow_database_queries to True to silence this failure."
+            "Database queries are not allowed in SimpleTestCase subclasses. "
+            "Either subclass TestCase or TransactionTestCase to ensure proper "
+            "test isolation or add 'default' to "
+            "test_utils.tests.DisallowedDatabaseQueriesTests.databases to "
+            "silence this failure."
         )
         with self.assertRaisesMessage(AssertionError, expected_message):
             Car.objects.first()
 
-
-class DisallowedDatabaseQueriesChunkedCursorsTests(SimpleTestCase):
-    def test_disallowed_database_queries(self):
+    def test_disallowed_database_chunked_cursor_queries(self):
         expected_message = (
-            "Database queries aren't allowed in SimpleTestCase. Either use "
-            "TestCase or TransactionTestCase to ensure proper test isolation or "
-            "set DisallowedDatabaseQueriesChunkedCursorsTests.allow_database_queries "
-            "to True to silence this failure."
+            "Database queries are not allowed in SimpleTestCase subclasses. "
+            "Either subclass TestCase or TransactionTestCase to ensure proper "
+            "test isolation or add 'default' to "
+            "test_utils.tests.DisallowedDatabaseQueriesTests.databases to "
+            "silence this failure."
         )
         with self.assertRaisesMessage(AssertionError, expected_message):
             next(Car.objects.iterator())
 
 
 class AllowedDatabaseQueriesTests(SimpleTestCase):
-    allow_database_queries = True
+    databases = {'default'}
 
     def test_allowed_database_queries(self):
         Car.objects.first()
+
+    def test_allowed_database_chunked_cursor_queries(self):
+        next(Car.objects.iterator(), None)
+
+
+class DatabaseAliasTests(SimpleTestCase):
+    def setUp(self):
+        self.addCleanup(setattr, self.__class__, 'databases', self.databases)
+
+    def test_no_close_match(self):
+        self.__class__.databases = {'void'}
+        message = (
+            "test_utils.tests.DatabaseAliasTests.databases refers to 'void' which is not defined "
+            "in settings.DATABASES."
+        )
+        with self.assertRaisesMessage(ImproperlyConfigured, message):
+            self._validate_databases()
+
+    def test_close_match(self):
+        self.__class__.databases = {'defualt'}
+        message = (
+            "test_utils.tests.DatabaseAliasTests.databases refers to 'defualt' which is not defined "
+            "in settings.DATABASES. Did you mean 'default'?"
+        )
+        with self.assertRaisesMessage(ImproperlyConfigured, message):
+            self._validate_databases()
+
+    def test_match(self):
+        self.__class__.databases = {'default', 'other'}
+        self.assertEqual(self._validate_databases(), frozenset({'default', 'other'}))
+
+    def test_all(self):
+        self.__class__.databases = '__all__'
+        self.assertEqual(self._validate_databases(), frozenset(connections))
 
 
 @isolate_apps('test_utils', attr_name='class_apps')

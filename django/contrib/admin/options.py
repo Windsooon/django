@@ -224,15 +224,16 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         """
         db = kwargs.get('using')
 
-        if db_field.name in self.get_autocomplete_fields(request):
-            kwargs['widget'] = AutocompleteSelect(db_field.remote_field, self.admin_site, using=db)
-        elif db_field.name in self.raw_id_fields:
-            kwargs['widget'] = widgets.ForeignKeyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
-        elif db_field.name in self.radio_fields:
-            kwargs['widget'] = widgets.AdminRadioSelect(attrs={
-                'class': get_ul_class(self.radio_fields[db_field.name]),
-            })
-            kwargs['empty_label'] = _('None') if db_field.blank else None
+        if 'widget' not in kwargs:
+            if db_field.name in self.get_autocomplete_fields(request):
+                kwargs['widget'] = AutocompleteSelect(db_field.remote_field, self.admin_site, using=db)
+            elif db_field.name in self.raw_id_fields:
+                kwargs['widget'] = widgets.ForeignKeyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+            elif db_field.name in self.radio_fields:
+                kwargs['widget'] = widgets.AdminRadioSelect(attrs={
+                    'class': get_ul_class(self.radio_fields[db_field.name]),
+                })
+                kwargs['empty_label'] = _('None') if db_field.blank else None
 
         if 'queryset' not in kwargs:
             queryset = self.get_field_queryset(db, db_field, request)
@@ -256,7 +257,7 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
             kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
         elif db_field.name in self.raw_id_fields:
             kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
-        elif db_field.name in list(self.filter_vertical) + list(self.filter_horizontal):
+        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
             kwargs['widget'] = widgets.FilteredSelectMultiple(
                 db_field.verbose_name,
                 db_field.name in self.filter_vertical
@@ -318,7 +319,7 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
             return self.fields
         # _get_form_for_get_fields() is implemented in subclasses.
         form = self._get_form_for_get_fields(request, obj)
-        return list(form.base_fields) + list(self.get_readonly_fields(request, obj))
+        return [*form.base_fields, *self.get_readonly_fields(request, obj)]
 
     def get_fieldsets(self, request, obj=None):
         """
@@ -724,7 +725,7 @@ class ModelAdmin(BaseModelAdmin):
         list_display_links = self.get_list_display_links(request, list_display)
         # Add the action checkboxes if any actions are available.
         if self.get_actions(request):
-            list_display = ['action_checkbox'] + list(list_display)
+            list_display = ['action_checkbox', *list_display]
         sortable_by = self.get_sortable_by(request)
         ChangeList = self.get_changelist(request)
         return ChangeList(
@@ -858,13 +859,8 @@ class ModelAdmin(BaseModelAdmin):
         for (name, func) in self.admin_site.actions:
             description = getattr(func, 'short_description', name.replace('_', ' '))
             actions.append((func, name, description))
-
-        # Then gather them from the model admin and all parent classes,
-        # starting with self and working back up.
-        for klass in self.__class__.mro()[::-1]:
-            class_actions = getattr(klass, 'actions', []) or []
-            actions.extend(self.get_action(action) for action in class_actions)
-
+        # Add actions from this ModelAdmin.
+        actions.extend(self.get_action(action) for action in self.actions or [])
         # get_action might have returned None, so filter any of those out.
         return filter(None, actions)
 
@@ -1589,7 +1585,8 @@ class ModelAdmin(BaseModelAdmin):
         adminForm = helpers.AdminForm(
             form,
             list(self.get_fieldsets(request, obj)),
-            self.get_prepopulated_fields(request, obj),
+            # Clear prepopulated fields on a view-only form to avoid a crash.
+            self.get_prepopulated_fields(request, obj) if add or self.has_change_permission(request, obj) else {},
             readonly_fields,
             model_admin=self)
         media = self.media + adminForm.media
@@ -1948,7 +1945,24 @@ class ModelAdmin(BaseModelAdmin):
                     'files': request.FILES,
                     'save_as_new': '_saveasnew' in request.POST
                 })
-            formsets.append(FormSet(**formset_params))
+            formset = FormSet(**formset_params)
+
+            def user_deleted_form(request, obj, formset, index):
+                """Return whether or not the user deleted the form."""
+                return (
+                    inline.has_delete_permission(request, obj) and
+                    '{}-{}-DELETE'.format(formset.prefix, index) in request.POST
+                )
+
+            # Bypass validation of each view-only inline form (since the form's
+            # data won't be in request.POST), unless the form was deleted.
+            if not inline.has_change_permission(request, obj if change else None):
+                for index, form in enumerate(formset.initial_forms):
+                    if user_deleted_form(request, obj, formset, index):
+                        continue
+                    form._errors = {}
+                    form.cleaned_data = form.initial
+            formsets.append(formset)
             inline_instances.append(inline)
         return formsets, inline_instances
 
@@ -2073,9 +2087,11 @@ class InlineModelAdmin(BaseModelAdmin):
                                     'class_name': p._meta.verbose_name,
                                     'instance': p}
                             )
-                        params = {'class_name': self._meta.model._meta.verbose_name,
-                                  'instance': self.instance,
-                                  'related_objects': get_text_list(objs, _('and'))}
+                        params = {
+                            'class_name': self._meta.model._meta.verbose_name,
+                            'instance': self.instance,
+                            'related_objects': get_text_list(objs, _('and')),
+                        }
                         msg = _("Deleting %(class_name)s %(instance)s would require "
                                 "deleting the following protected related objects: "
                                 "%(related_objects)s")
@@ -2110,7 +2126,8 @@ class InlineModelAdmin(BaseModelAdmin):
             queryset = queryset.none()
         return queryset
 
-    def has_add_permission(self, request, obj):
+    def has_add_permission(self, request, obj=None):
+        # RemovedInDjango31Warning: obj becomes a mandatory argument.
         if self.opts.auto_created:
             # We're checking the rights to an auto-created intermediate model,
             # which doesn't have its own individual permissions. The user needs

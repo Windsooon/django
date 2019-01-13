@@ -132,8 +132,11 @@ class GetDefaultUsernameTestCase(TestCase):
 ])
 class ChangepasswordManagementCommandTestCase(TestCase):
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username='joe', password='qwerty')
+
     def setUp(self):
-        self.user = User.objects.create_user(username='joe', password='qwerty')
         self.stdout = StringIO()
         self.stderr = StringIO()
 
@@ -210,7 +213,7 @@ class ChangepasswordManagementCommandTestCase(TestCase):
 
 
 class MultiDBChangepasswordManagementCommandTestCase(TestCase):
-    multi_db = True
+    databases = {'default', 'other'}
 
     @mock.patch.object(changepassword.Command, '_get_pass', return_value='not qwerty')
     def test_that_changepassword_command_with_database_option_uses_given_db(self, mock_get_pass):
@@ -903,7 +906,7 @@ class CreatesuperuserManagementCommandTestCase(TestCase):
 
 
 class MultiDBCreatesuperuserTestCase(TestCase):
-    multi_db = True
+    databases = {'default', 'other'}
 
     def test_createsuperuser_command_with_database_option(self):
         """
